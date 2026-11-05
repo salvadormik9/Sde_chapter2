@@ -1,0 +1,40 @@
+#### Load packages ####
+library(readxl)
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+library(rnaturalearth)
+library(sf)
+library(ggnewscale)
+
+#### Read in data ####
+modern_sites <- read_excel("inputs/contemporary_sampling_sites.xlsx") %>%
+  clean_names()
+
+#### Create map polygons ####
+# Get Philippines coastline
+ph <- ne_countries(country = "Philippines", 
+                   scale = "medium",
+                   returnclass = "sf")
+
+
+#### Plot basic map ####
+ggplot() +
+  geom_sf(data = ph, 
+          fill = "#EDEDD9", 
+          color = "black", 
+          linewidth = 0.3) +
+  new_scale_fill()+ 
+  geom_point(data = modern_sites,
+             aes(x = longitude,
+                 y = latitude,
+                 color = province),
+             size = 3,
+             stroke = 0.8) +
+  theme_bw() +
+  labs(x = "Longitude",
+       y = "Latitude",
+       color = "Province")
+
+
+

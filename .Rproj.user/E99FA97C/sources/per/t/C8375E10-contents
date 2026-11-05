@@ -1,0 +1,8 @@
+#### Load packages ####
+library(readxl)
+library(tidyverse)
+library(janitor)
+library(ggplot2)
+library(ggnewscale)
+
+modern_sites <- read_excel("inputs/contemporary_sampling_sites.xlsx")
