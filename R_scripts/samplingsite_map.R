@@ -6,35 +6,165 @@ library(ggplot2)
 library(rnaturalearth)
 library(sf)
 library(ggnewscale)
+library(terra)
+library(ggrepel)
+
+#### Download data  ####
+# This only runs if there isn't already a file downloaded to the directory
+options(timeout = 3600)  # default 60 s timeout is too short for big files
+
+dir.create("inputs/coral_reef_watch", recursive = TRUE, showWarnings = FALSE)
+dir.create("inputs/worldpop",         recursive = TRUE, showWarnings = FALSE)
+
+sst_file <- "inputs/coral_reef_watch/ct5km_climatology_v3.1.nc"
+pop_file <- "inputs/worldpop/phl_ppp_2020_1km_Aggregated_UNadj.tif"
+
+# NOAA Coral Reef Watch 5 km climatology (global file, ~78 MB)
+if (!file.exists(sst_file)) {
+  download.file(
+    url = "https://www.star.nesdis.noaa.gov/pub/sod/mecb/crw/data/5km/v3.1_op/climatology/nc/ct5km_climatology_v3.1.nc",
+    destfile = sst_file,
+    mode = "wb"   # "wb" is essential on Windows or the file gets corrupted
+  )
+}
+
+# WorldPop 2020, 1 km, UN-adjusted, Philippines (GeoTIFF version of your advisor's CSV)
+if (!file.exists(pop_file)) {
+  download.file(
+    url = "https://data.worldpop.org/GIS/Population/Global_2000_2020_1km_UNadj/2020/PHL/phl_ppp_2020_1km_Aggregated_UNadj.tif",
+    destfile = pop_file,
+    mode = "wb"
+  )
+}
 
 #### Read in data ####
 modern_sites <- read_excel("inputs/contemporary_sampling_sites.xlsx") %>%
-  clean_names()
+  clean_names() %>%
+  unite(col = "lgu_province",
+        local_government_unit,
+        province,
+        sep = ", ",
+        remove = FALSE)
 
 #### Create map polygons ####
-# Get Philippines coastline
-ph <- ne_countries(country = "Philippines", 
+ph <- ne_countries(country = "Philippines",
                    scale = "medium",
                    returnclass = "sf")
 
+# NEW: all countries, used as a grey land background so neighbouring land
+# (e.g., Sabah, Malaysia in the bottom-left) isn't left blank
+world <- ne_countries(scale = "medium",
+                      returnclass = "sf")
 
-#### Plot basic map ####
-ggplot() +
-  geom_sf(data = ph, 
-          fill = "#EDEDD9", 
-          color = "black", 
-          linewidth = 0.3) +
-  new_scale_fill()+ 
+#### Read and wrangle SST (Coral Reef Watch max monthly mean) ####
+
+## Set up map window (same as advisor: 116-127E, 4-20N)
+my_ext <- ext(116, 127, 4, 20)
+
+sst_rast <- rast(sst_file,
+                 subds = "sst_clim_mmm")
+
+sst_rast <- sst_rast[[1]]
+sst_rast <- crop(sst_rast,
+                 my_ext)
+
+# terra raster -> data frame that ggplot can use
+sst_df <- as.data.frame(sst_rast,
+                        xy = TRUE,
+                        na.rm = TRUE)
+names(sst_df) <- c("x", "y", "sst")
+
+#### Read and wrangle population (WorldPop 2020, 1 km) ####
+pop_rast <- rast(pop_file)
+pop_rast <- crop(pop_rast, my_ext)
+
+pop_df <- as.data.frame(pop_rast, xy = TRUE, na.rm = TRUE)
+names(pop_df) <- c("x", "y", "pop")
+
+# log10 transform like advisor; drop empty cells so they stay see-through
+pop_df <- pop_df %>%
+  mutate(log_pop = log10(pop + 1)) %>%
+  filter(pop > 0)
+
+#### Plot map ####
+# Set up color palettes for SST and population data
+sst_pal <- c("#0407C8", "#8ECBFA", "#ECFDAE", "#ED772F", "#83180F")
+pop_pal <- c("#F2F0DC", "#679A78")
+
+# Layer order: land background -> SST (ocean) -> population (land) ->
+# coastline outline -> sites.
+# new_scale_fill() lets SST and population each have their own fill legend.
+p <- ggplot() +
+  geom_sf(data = world,
+          fill = "#F2F0DC",
+          color = "grey25",
+          linewidth = 0.4) +
+  geom_raster(data = sst_df,
+              aes(x = x,
+                  y = y,
+                  fill = sst)) +
+  scale_fill_gradientn(colours = sst_pal,
+                       limits  = c(28.5, 30.5),
+                       oob     = scales::squish,
+                       name    = "Maximum Maximum Monthly \nMean SST (°C)",
+                       guide   = guide_colourbar(order = 1)) +
+  new_scale_fill() +
+  geom_raster(data = pop_df,
+              aes(x = x,
+                  y = y,
+                  fill = log_pop)) +
+  scale_fill_gradientn(colors = pop_pal,
+                       name    = "People Per Square Km",
+                       breaks  = log10(c(1,
+                                         10,
+                                         100,
+                                         1000,
+                                         10000,
+                                         100000)
+                                       + 1),
+                       labels  = c("1",
+                                   "10",
+                                   "100",
+                                   "1,000",
+                                   "10,000",
+                                   "100,000"),
+                       guide   = guide_colourbar(order = 2)) +
+  geom_sf(data = ph,
+          fill = NA,
+          color = "grey25",
+          linewidth = 0.4) +
+  geom_label_repel(
+    data = modern_sites,
+    aes(x = longitude,
+        y = latitude,
+        label = lgu_province),
+    min.segment.length = 0,
+    size = 3,
+    box.padding = .5,
+    force = 3,
+    force_pull = 3,
+    max.overlaps = Inf,
+    seed = 1
+  ) +
   geom_point(data = modern_sites,
              aes(x = longitude,
-                 y = latitude,
-                 color = province),
-             size = 3,
+                 y = latitude),
+             size = 1,
              stroke = 0.8) +
-  theme_bw() +
+  coord_sf(xlim = c(117,
+                    127),
+           ylim = c(6,
+                    18.75),
+           expand = FALSE) +
   labs(x = "Longitude",
-       y = "Latitude",
-       color = "Province")
+       y = "Latitude")
 
+p
 
-
+ggsave("outputs/sampling_map.png",
+       plot = p,
+       device = "png",
+       units = "in",
+       width = 8,
+       height = 9,
+       dpi = 300)

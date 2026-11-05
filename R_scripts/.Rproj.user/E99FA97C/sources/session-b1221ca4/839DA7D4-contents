@@ -1,0 +1,79 @@
+require(ncdf4)
+require(sf)
+require(raster)
+
+#setwd('~/Documents/UCSC/funding/applied/2023/2023-05 NSF DEB Evol Albatross/preliminary')
+setwd('~/Documents/UCSC/funding/active/2023-07 NSF DEB Evol Albatross/2023 proposal/preliminary')
+
+################### 
+# Data Download
+# 2023-07-12
+# downloaded worldpop at 1km: https://hub.worldpop.org/doi/10.5258/SOTON/WP00671
+# philippines 2020
+# downloaded coral reef watch climatology max monthly mean
+# plotted in panoply
+# also started R scrip
+
+#############################
+# read SST
+nc_data <- nc_open('coral_reef_watch/ct5km_climatology_v3.1.nc')
+
+print(nc_data)
+
+lon <- ncvar_get(nc_data, "lon")
+lat <- ncvar_get(nc_data, "lat", verbose = F)
+
+
+lonstart <- min(which(lon > 116))
+loncount <- max(which(lon < 127)) - lonstart
+latstart <- min(which(lat < 20))
+latcount <- max(which(lat > 4)) - latstart
+sst <- ncvar_get(nc_data, "sst_clim_mmm", start = c(lonstart, latstart, 1), count = c(loncount, latcount, 1)) # store the data in a 3-dimensional array
+sstrast <- raster(t(sst), xmn = lon[lonstart], ymx = lat[latstart], xmx = lon[lonstart+loncount], ymn = lat[latstart+latcount])
+
+plot(sstrast, las = 1) # check
+
+
+#############################
+# read worldpop
+pop <- read.csv('worldpop/ppp_PHL_2020_1km_Aggregated_UNadj.csv')
+poprast <- rasterFromXYZ(pop)
+
+plot((poprast), las = 1, col = rainbow(100)) # check
+plot(log10(poprast+1), las = 1, col = rainbow(100)) # log-transformed population.
+
+#############################
+# plot
+sstbreaks <- seq(28.5, 30.5, by = 0.01)
+sstpal <- colorRampPalette(c("#0407C8","#8ECBFA", "#ECFDAE", "#ED772F", "#83180F"))
+poppal <- colorRampPalette(c("#E8DED5", "#E8DED5","#E8DED5","#ACA470","#ACA470","#737C30","#485528","#132407")) # from NEO_modis_ndvi at https://www.giss.nasa.gov/tools/panoply/colorbars/
+
+my_window <- extent(116,127,4,20)
+
+png('sst_and_pop.png', width=4, height=5, units='in', res=300)
+par(mai=c(0.5,0.5,0.1,0.1), mgp=c(1, 0.1, 0), tcl=0.5, xaxs='i', yaxs='i')
+plot(my_window, col=NA, bty='l', xlab='Longitude (°E)', ylab='Latitude (°N)', xaxt='n', yaxt='n')
+plot(sstrast, breaks = sstbreaks, col = sstpal(length(sstbreaks)+1), legend = FALSE, bty='n', box = FALSE, add = TRUE)
+plot(log10(poprast+1), las = 1, add = TRUE, col = poppal(100), legend = FALSE, bty='n', box = FALSE)
+axis(1, at = seq(116, 126, by = 2), cex.axis = 0.8)
+axis(2, at = seq(5, 20, by = 1), las = 1, cex.axis = 0.8)
+
+legend(x=116.1, y=19.9, cex=0.5, legend = c("High", "", "", "Low"), fill = rev(poppal(4)), title='Number of people', xpd=TRUE, bty='o', bg='white')
+legend(x=116.1, y=17, cex=0.5, legend = c("30.5", "30", "29.5", "29", "28.5"), fill = rev(sstpal(5)), title='Maximum SST (°C)', xpd=TRUE, bty='o', bg='white')
+dev.off()
+
+
+# plot only population
+poppal <- colorRampPalette(c("#E8DED5", "#E8DED5","#E8DED5","#ACA470","#ACA470","#737C30","#485528","#132407")) # from NEO_modis_ndvi at https://www.giss.nasa.gov/tools/panoply/colorbars/
+
+my_window <- extent(116,127,4,20)
+
+png('pop.png', width=4, height=5, units='in', res=300)
+par(mai=c(0.5,0.5,0.1,0.1), mgp=c(1, 0.1, 0), tcl=0.5, xaxs='i', yaxs='i')
+plot(my_window, col=NA, bty='l', xlab='Longitude (°E)', ylab='Latitude (°N)', xaxt='n', yaxt='n')
+plot(log10(poprast+1), las = 1, add = TRUE, col = poppal(100), legend = FALSE, bty='n', box = FALSE)
+axis(1, at = seq(116, 126, by = 2), cex.axis = 0.8)
+axis(2, at = seq(5, 20, by = 1), las = 1, cex.axis = 0.8)
+
+legend(x=116.1, y=19.9, cex=0.5, legend = c(">1000", "100-1000", "10-100", "<10"), fill = rev(poppal(4)), title='People per sq. km.', xpd=TRUE, bty='o', bg='white')
+dev.off()
